@@ -62,6 +62,20 @@ const L = require('./lib');
       counts.links1b = await page.evaluate(() => checkLinks(CAND.docs.filter(d => d.aec || d.up === 'Review').map(d => d.url)));
       L.log('checkLinks again', counts.links1b);
     }
+    if (process.argv.includes('--get404')) {
+      // Some CMSs (CivicPlus DocumentCenter) answer HEAD with 404 but GET with 200. S5 only falls back to GET on 405/403/501,
+      // so re-check the 404s with the same GET + Range request S5 uses as its fallback, 8 at a time, and record that result.
+      counts.get404 = await page.evaluate(async () => {
+        const urls = Object.keys(LINKS).filter(u => LINKS[u].status === 404); let i = 0, fixed = 0;
+        async function w() { while (i < urls.length) { const u = urls[i++]; try {
+          const r = await fetch(u, { method: 'GET', credentials: 'include', redirect: 'follow', headers: { Range: 'bytes=0-0' } });
+          const cd = r.headers.get('content-disposition') || ''; const fm = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i);
+          if (r.status !== 404) { LINKS[u] = { status: r.status === 206 ? 200 : r.status, ct: (r.headers.get('content-type') || '').split(';')[0].trim(), len: r.headers.get('content-length') || '', fname: fm ? decodeURIComponent(fm[1]).trim() : '', final: r.url !== u ? r.url : '', note: 'HEAD 404, GET ok' }; fixed++; }
+          try { r.body && r.body.cancel(); } catch (e) {} } catch (e) {} } }
+        await Promise.all([...Array(8)].map(w)); return 'rechecked ' + urls.length + ' HEAD-404 links with GET, ' + fixed + ' are live';
+      });
+      L.log('get404', counts.get404);
+    }
     await L.saveVar(page, dir, 'LINKS');
     counts.cand2 = await page.evaluate(() => buildCandidates());
     L.log('buildCandidates 2', counts.cand2);
@@ -87,8 +101,14 @@ const L = require('./lib');
       if (op === 'setDec') r = await page.evaluate(a => setDec(a), arg);
       else if (op === 'setMap') r = await page.evaluate(a => setMap(a), arg);
       else if (op === 'checkLinks') { r = await page.evaluate(a => checkLinks(a), arg); await L.saveVar(page, dir, 'LINKS'); }
+      else if (op === 'recheckGet') { // re-check given URLs with GET + Range (S5's fallback request) and record the result
+        r = await page.evaluate(async urls => { let ok = 0; for (const u of urls) { try { const x = await fetch(u, { method: 'GET', credentials: 'include', redirect: 'follow', headers: { Range: 'bytes=0-0' } });
+          const cd = x.headers.get('content-disposition') || ''; const fm = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i);
+          LINKS[u] = { status: x.status === 206 ? 200 : x.status, ct: (x.headers.get('content-type') || '').split(';')[0].trim(), len: x.headers.get('content-length') || '', fname: fm ? decodeURIComponent(fm[1]).trim() : '', final: x.url !== u ? x.url : '', note: 'rechecked with GET' };
+          if (x.status < 400) ok++; try { x.body && x.body.cancel(); } catch (e) {} } catch (e) {} } return ok + ' of ' + urls.length + ' live'; }, arg);
+        await L.saveVar(page, dir, 'LINKS'); }
       else if (op === 'setOrg') r = await page.evaluate(a => AG.setOrg(a), arg);
-      else if (op === 'orgSearch') r = await page.evaluate(a => AG.orgSearch(a), arg);
+      else if (op === 'orgSearch') r = await page.evaluate(a => AG.orgSearch(a || AG.orgId), arg);
       else if (op === 'resolveItem') r = await page.evaluate(a => AG.resolveItem(a, 'manual'), arg);
       else if (op === 'addService') r = await page.evaluate(a => AG.addService(a, 'manual'), arg);
       else if (op === 'server') r = await page.evaluate(a => AG.server(a), arg);
