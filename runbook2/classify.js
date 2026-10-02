@@ -19,6 +19,27 @@ const L = require('./lib');
   const { browser, ctx } = await L.launch();
   const page = await L.openSite(ctx, RUN);
   L.log('restored pages', await L.loadCR(page, dir));
+  if (process.argv.includes('--splash')) {
+    // Granicus sites wrap every external link as /?splash=<url>&____isexternal=true on their own host, so S2 crawls them as pages
+    // and CR.ext misses them. Add each decoded target to CR.ext (same row shape as S2's importCrawl) once, and persist cr.json.
+    const n = await page.evaluate(() => {
+      if (CR.splashImported) return 'already ' + CR.splashImported;
+      let n = 0;
+      const keys = new Set([...Object.keys(CR.pages), ...CR.seen, ...Object.keys(CR.failed)]);
+      for (const k of keys) {
+        let t = '';
+        try { const x = new URL(k); if (!x.searchParams.has('splash')) continue; t = x.searchParams.get('splash'); new URL(t); } catch (e) { continue; }
+        if (CR.ext[t]) continue;
+        let host = ''; try { host = new URL(t).hostname; } catch (e) {}
+        CR.ext[t] = { text: t, ctx: 'external link (Granicus ?splash= redirect)', heading: '', src: [], pageTitle: '', host };
+        n++;
+      }
+      CR.splashImported = n;
+      return n;
+    });
+    L.log('splash links added to CR.ext', n);
+    await L.saveCR(page, dir);
+  }
   await L.loadVar(page, dir, 'LINKS', {});
   await L.loadVar(page, dir, 'DEC', {});
   await L.loadVar(page, dir, 'MDEC', {});
