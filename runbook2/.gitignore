@@ -1,0 +1,4 @@
+snippets/
+runs/
+node_modules/
+*.xlsx

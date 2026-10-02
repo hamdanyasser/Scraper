@@ -1,0 +1,40 @@
+# Runbook 2 stage scripts (Claude Code cloud session)
+
+Plumbing for AIAEC Runbook 2 (Jira ticket → crawl → classify → workbook) when the run happens in a Claude Code cloud
+container instead of Claude in Chrome. The stages, rules, Reference A–E and snippets S2–S9 are the runbook's own; these
+scripts only run them in headless Chromium and keep the state on disk. Jira (start comment, Progress comment, scrape
+comment, attachment, transition) goes through the Atlassian connector, not S1.
+
+## One-time setup per container
+
+```sh
+# Chromium must trust the egress proxy CA (TLS verification stays on)
+apt-get install -y libnss3-tools
+certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n ccr-agent-proxy -i /root/.ccr/agent-proxy-ca.crt
+# copy S2–S9 verbatim from the runbook you are running
+node extract_snippets.js /path/to/Runbook_2_v2_unattended.md
+```
+
+## Per ticket
+
+State lives in `$STATE_ROOT/<KEY>/` (default `./runs/<KEY>/`, git-ignored). Write `run.json` first (= `window.RUN`):
+
+```json
+{"key":"DATA-…","city":"…","state":"ST","county":"…","site":"https://…","date":"YYYY-MM-DD","maxPages":20000,"maxMinutes":120,"crawlNews":false,"etlHtml":false}
+```
+
+| Step | Command | Runbook |
+| --- | --- | --- |
+| Verify a page | `node readpage.js <url> <out.txt>` | Stage 2, Stage 4 review, Stage 6 |
+| Crawl | `node crawl.js <KEY>` (`--resume` continues from `cr.json`) | Stage 3 steps 1–3: S2, crawlHealth, one `retryFailed(2,1500)` |
+| Classify + maps | `node classify.js <KEY> [--nonaec]` | Stage 3 steps 5–7 (S3–S6, checkLinks), Stage 5 (S7, S8, `AG.fromCrawl`); writes the `dump_*.txt` review files |
+| Review decisions | `node classify.js <KEY> --ops ops.json` | Stage 4 `setDec`, Stage 5 `setMap` / `AG.setOrg` / `AG.resolveItem` / `AG.addService` / `AG.server` |
+| Ordinance + codes | write `ord.json` (`window.ORD`) and `codes.json` (`window.CODES`) | Stage 6 |
+| Workbook | `node build.js <KEY> <outDir>` | Stage 7: S9 `buildWorkbook` + `downloadWorkbook`, saved to `<outDir>`; counts in `build.json` |
+
+`ops.json` is a list of `[op, arg]` pairs; only `setDec`, `setMap`, `checkLinks`, `setOrg`, `orgSearch`, `resolveItem`,
+`addService` and `server` exist. There is no eval of arbitrary code and no long-running server.
+
+Saved state: `cr.json` (CR with `seen` as an array; checkpointed every 2 minutes during the crawl), `links.json`,
+`cand.json`, `dec.json`, `mdec.json`, `ag.json` (layers with `via` as arrays), `ord.json`, `codes.json`, `health.json`,
+`build.json`.
