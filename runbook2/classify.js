@@ -107,9 +107,10 @@ const L = require('./lib');
       else if (op === 'setMap') r = await page.evaluate(a => setMap(a), arg);
       else if (op === 'checkLinks') { r = await page.evaluate(a => checkLinks(a), arg); await L.saveVar(page, dir, 'LINKS'); }
       else if (op === 'recheckGet') { // re-check given URLs with GET + Range (S5's fallback request) and record the result
-        r = await page.evaluate(async urls => { let ok = 0; for (const u of urls) { try { const x = await fetch(u, { method: 'GET', credentials: 'include', redirect: 'follow', headers: { Range: 'bytes=0-0' } });
+        r = await page.evaluate(async urls => { let ok = 0; for (const u of urls) { try { // http:// links are blocked as mixed content on an https page: check the https URL the site redirects to
+          const fu = location.protocol === 'https:' && /^http:\/\//.test(u) ? u.replace(/^http:/, 'https:') : u; const x = await fetch(fu, { method: 'GET', credentials: 'include', redirect: 'follow', headers: { Range: 'bytes=0-0' } });
           const cd = x.headers.get('content-disposition') || ''; const fm = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i);
-          LINKS[u] = { status: x.status === 206 ? 200 : x.status, ct: (x.headers.get('content-type') || '').split(';')[0].trim(), len: x.headers.get('content-length') || '', fname: fm ? decodeURIComponent(fm[1]).trim() : '', final: x.url !== u ? x.url : '', note: 'rechecked with GET' };
+          LINKS[u] = { status: x.status === 206 ? 200 : x.status, ct: (x.headers.get('content-type') || '').split(';')[0].trim(), len: x.headers.get('content-length') || '', fname: fm ? decodeURIComponent(fm[1]).trim() : '', final: x.url !== u ? x.url : '', note: fu !== u ? 'rechecked with GET on https' : 'rechecked with GET' };
           if (x.status < 400) ok++; try { x.body && x.body.cancel(); } catch (e) {} } catch (e) {} } return ok + ' of ' + urls.length + ' live'; }, arg);
         await L.saveVar(page, dir, 'LINKS'); }
       else if (op === 'setOrg') r = await page.evaluate(a => AG.setOrg(a), arg);
