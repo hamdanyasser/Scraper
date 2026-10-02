@@ -36,12 +36,15 @@ Options learned on real sites (2 Oct 2026 runs):
 
 - `./crawlloop.sh <KEY> [crawl.js options]` — use instead of `node crawl.js`: S2's fetches have no timeout, so crawl.js exits 3
   after 5 minutes without progress and the loop resumes it from `cr.json`.
+- `crawl.js --fetch-timeout` / `classify.js --fetch-timeout` — abort any in-page fetch after 60 s (S2's crawl and `retryFailed`, S5 and
+  S7 have no timeout; one dead server otherwise hangs the run). Use it on every city.
 - `crawl.js --exclude '<regex>'` — drop a CMS crawl trap from the queue. Granicus sites:
   `'/i-want-to/advanced-components/|/Sys/Sso/|/Home/Components/(StaffDirectory|BusinessDirectory)/'`.
 - `classify.js --get404` — CivicPlus DocumentCenter answers HEAD with 404 and GET with 200; re-checks the 404s with S5's
   GET + Range fallback. Use it on every city (harmless elsewhere).
 - `classify.js --splash` — Granicus wraps external links as `/?splash=<url>`; adds the decoded targets to `CR.ext`.
-- op `["recheckGet", [urls]]` — re-check specific links (transient 502s) with GET.
+- op `["recheckGet", [urls]]` — re-check specific links (transient 502s) with GET; `http://` links are checked on their `https://`
+  address, since an https page blocks them as mixed content (they would otherwise show Link Status ERR).
 - Review traps seen: S4's latest-only rule groups look-alike titles ("Ordinance No. 26-24" vs "25-60") as one family and marks
   distinct ordinances superseded; "Historical" in a district name trips the archive rule; S9 makes PARCELS TAB rows Upload = Yes
   unless a `setMap` sets No; titles containing "Plat" or "Map" become Later.
