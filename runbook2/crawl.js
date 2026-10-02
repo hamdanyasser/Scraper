@@ -22,10 +22,23 @@ const L = require('./lib');
     await page.evaluate(el => { CR.running = true; CR.finished = false; CR.active = 0; CR.started = Date.now() - el; }, elapsed);
     L.log('resumed from checkpoint', await page.evaluate(() => crawlStatus()));
   }
+  // --exclude <regex>: drop matching URLs from CR.queue at every poll (a CMS crawl trap S2's skip list misses, e.g. Granicus
+  // /i-want-to/advanced-components/ demo templates). Does not touch S2's code; the count is kept in CR.excluded for the comment.
+  const exIdx = process.argv.indexOf('--exclude');
+  const exclude = exIdx > 0 ? process.argv[exIdx + 1] : null;
+  const purge = async () => {
+    if (!exclude) return;
+    const n = await page.evaluate(re => { const r = new RegExp(re, 'i'); const b = CR.queue.length; CR.queue = CR.queue.filter(u => !r.test(u)); CR.excluded = (CR.excluded || 0) + b - CR.queue.length; CR.excludeRe = re; return b - CR.queue.length; }, exclude);
+    if (n) L.log('excluded from queue', n);
+  };
+  await purge();
   let lastSave = 0;
   const save = async () => { await page.evaluate(() => { CR.lastSave = Date.now(); }); await L.saveCR(page, dir); lastSave = Date.now(); };
   for (;;) {
-    await page.waitForTimeout(30000);
+    await page.waitForTimeout(exclude ? 5000 : 30000);
+    await purge();
+    if (exclude && (Date.now() - (save.lastLog || 0) < 30000)) continue;
+    save.lastLog = Date.now();
     const s = JSON.parse(await page.evaluate(() => crawlStatus()));
     L.log('crawlStatus', JSON.stringify(s));
     fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify(s));
@@ -47,6 +60,7 @@ const L = require('./lib');
   out.final = health;
   out.minutes = await page.evaluate(() => Math.round((Date.now() - CR.started) / 60000));
   out.skippedNews = await page.evaluate(() => CR.skippedNews);
+  out.excluded = await page.evaluate(() => ({ n: CR.excluded || 0, re: CR.excludeRe || '' }));
   L.writeJSON(path.join(dir, 'health.json'), out);
   await L.dumpTo(page, path.join(dir, 'dump_failed.txt'), 'dumpFailed()');
   L.log('crawl done', JSON.stringify(out));
