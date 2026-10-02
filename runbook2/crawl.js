@@ -44,6 +44,12 @@ const L = require('./lib');
     fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify(s));
     if (s.finished) break;
     if (Date.now() - lastSave > 120000) await save();
+    // Watchdog: S2's fetches have no timeout, so a server that never answers can hang all workers. If nothing moved for
+    // 5 minutes, checkpoint and exit 3; run under `until node crawl.js KEY --resume ...; [ $? -ne 3 ] && break; done`.
+    if (s.done !== save.lastDone) { save.lastDone = s.done; save.lastMove = Date.now(); }
+    else if (Date.now() - (save.lastMove || Date.now()) > 300000 && s.queue > 0) {
+      await save(); L.log('stalled for 5 min with', s.queue, 'queued; exiting 3 to resume'); await browser.close(); process.exit(3);
+    }
   }
   await save();
   let health = JSON.parse(await page.evaluate(() => crawlHealth()));
