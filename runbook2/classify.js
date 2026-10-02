@@ -43,6 +43,11 @@ const L = require('./lib');
   await L.loadVar(page, dir, 'LINKS', {});
   await L.loadVar(page, dir, 'DEC', {});
   await L.loadVar(page, dir, 'MDEC', {});
+  if (process.argv.includes('--fetch-timeout')) {
+    // S5/S7 fetches have no timeout; a server that never answers hangs the run. Abort any in-page fetch after 60 s.
+    await page.evaluate(() => { const orig = window.fetch.bind(window); window.fetch = (u, o) => { const c = new AbortController(); const t = setTimeout(() => c.abort(), 60000);
+      return orig(u, Object.assign({}, o || {}, { signal: c.signal })).finally(() => clearTimeout(t)); }; });
+  }
   await L.inject(page, 'S3', 'S4', 'S5', 'S6', 'S7', 'S8');
   const counts = {};
   counts.cand1 = await page.evaluate(() => buildCandidates());
