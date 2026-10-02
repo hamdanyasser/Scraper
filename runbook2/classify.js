@@ -5,7 +5,7 @@
 // With --ops: restore CR, LINKS, DEC, MDEC, AG → buildCandidates → apply the operations in ops.json → save → rewrite the dumps.
 // ops.json is a list of [op, ...args]; only these ops exist (no arbitrary code):
 //   ["setDec", [[id, up, reason, cat, scope, hint], ...]]   ["setMap", [[mid, type, up, reason], ...]]
-//   ["checkLinks", [url, ...]]  ["setOrg", host]  ["orgSearch", orgId]  ["resolveItem", id]  ["addService", url]  ["server", url]
+//   ["checkLinks", [url, ...]]  ["recheckGet", [url, ...]]  ["recheckNode", [url, ...] or "*status0"]  ["setOrg", host]  ["orgSearch", orgId]  ["resolveItem", id]  ["addService", url]  ["server", url]
 const path = require('path');
 const fs = require('fs');
 const L = require('./lib');
@@ -113,6 +113,21 @@ const L = require('./lib');
           LINKS[u] = { status: x.status === 206 ? 200 : x.status, ct: (x.headers.get('content-type') || '').split(';')[0].trim(), len: x.headers.get('content-length') || '', fname: fm ? decodeURIComponent(fm[1]).trim() : '', final: x.url !== u ? x.url : '', note: fu !== u ? 'rechecked with GET on https' : 'rechecked with GET' };
           if (x.status < 400) ok++; try { x.body && x.body.cancel(); } catch (e) {} } catch (e) {} } return ok + ' of ' + urls.length + ' live'; }, arg);
         await L.saveVar(page, dir, 'LINKS'); }
+      else if (op === 'recheckNode') {
+        // Links that redirect to another host (e.g. a CMS file CDN) fail the in-page check with status 0 because of CORS.
+        // Check them from Playwright's request context instead (same browser profile and proxy, no CORS), GET + Range, 8 at a time.
+        const urls = arg === '*status0' ? await page.evaluate(() => Object.keys(LINKS).filter(u => !LINKS[u].status)) : arg;
+        const res = {}; let i = 0, ok = 0;
+        async function w() { while (i < urls.length) { const u = urls[i++]; try {
+          const x = await ctx.request.get(u, { headers: { Range: 'bytes=0-0' }, maxRedirects: 10, timeout: 60000 });
+          const h = x.headers(); const fm = (h['content-disposition'] || '').match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i);
+          res[u] = { status: x.status() === 206 ? 200 : x.status(), ct: (h['content-type'] || '').split(';')[0].trim(), len: h['content-length'] || '', fname: fm ? decodeURIComponent(fm[1]).trim() : '', final: x.url() !== u ? x.url() : '', note: 'checked outside the page (cross-origin redirect)' };
+          if (x.status() < 400) ok++; } catch (e) {} } }
+        await Promise.all([...Array(8)].map(w));
+        await page.evaluate(r => Object.assign(LINKS, r), res);
+        await L.saveVar(page, dir, 'LINKS');
+        r = ok + ' of ' + urls.length + ' live';
+      }
       else if (op === 'setOrg') r = await page.evaluate(a => AG.setOrg(a), arg);
       else if (op === 'orgSearch') r = await page.evaluate(a => AG.orgSearch(a || AG.orgId), arg);
       else if (op === 'resolveItem') r = await page.evaluate(a => AG.resolveItem(a, 'manual'), arg);

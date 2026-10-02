@@ -45,6 +45,12 @@ Options learned on real sites (2 Oct 2026 runs):
 - `classify.js --splash` — Granicus wraps external links as `/?splash=<url>`; adds the decoded targets to `CR.ext`.
 - op `["recheckGet", [urls]]` — re-check specific links (transient 502s) with GET; `http://` links are checked on their `https://`
   address, since an https page blocks them as mixed content (they would otherwise show Link Status ERR).
+- op `["recheckNode", [urls] | "*status0"]` — check links from Playwright's request context instead of the page (no CORS):
+  for documents that redirect to another host (Revize `cms7files.revize.com`, CivicPlus `content.civicplus.com`), which the
+  in-page check reports as status 0.
+- `node renderlinks.js <KEY> [--lanes 4] [--wait 2500]` — run after crawl.js on JavaScript-rendered sites (CivicPlus HCMS titles
+  "… Official Website | Official Website"), where S2 sees only the menus and records 0 documents: renders every crawled page and adds
+  its document links to `CR.files` in S2's row shape; then classify with `["recheckNode","*status0"]`.
 - Review traps seen: S4's latest-only rule groups look-alike titles ("Ordinance No. 26-24" vs "25-60") as one family and marks
   distinct ordinances superseded; "Historical" in a district name trips the archive rule; S9 makes PARCELS TAB rows Upload = Yes
   unless a `setMap` sets No; titles containing "Plat" or "Map" become Later.
