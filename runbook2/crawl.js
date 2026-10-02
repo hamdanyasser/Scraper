@@ -1,4 +1,4 @@
-// crawl.js <KEY> [--resume] — Runbook 2 Stage 3 steps 1–3: S2 crawl in "Tab B", crawlHealth, one slow retryFailed pass.
+// crawl.js <KEY> [--resume] [--exclude regex] [--fetch-timeout] — Runbook 2 Stage 3 steps 1–3: S2 crawl in "Tab B", crawlHealth, one slow retryFailed pass.
 // Needs <state>/<KEY>/run.json = window.RUN {key,city,state,county,site,date,maxPages,maxMinutes,crawlNews,etlHtml}.
 // Checkpoints window.CR to cr.json every 2 minutes, so a crash never loses the crawl; --resume continues from cr.json.
 const path = require('path');
@@ -13,6 +13,11 @@ const L = require('./lib');
   if (!RUN) throw new Error('missing run.json in ' + dir);
   const { browser, ctx } = await L.launch();
   const page = await L.openSite(ctx, RUN);
+  if (process.argv.includes('--fetch-timeout')) {
+    // S2's fetches (crawl and retryFailed) have no timeout; abort any in-page fetch after 60 s so one dead server cannot hang the run.
+    await page.evaluate(() => { const orig = window.fetch.bind(window); window.fetch = (u, o) => { const c = new AbortController(); const t = setTimeout(() => c.abort(), 60000);
+      return orig(u, Object.assign({}, o || {}, { signal: c.signal })).finally(() => clearTimeout(t)); }; });
+  }
   await L.inject(page, 'S2');
   if (resume && fs.existsSync(path.join(dir, 'cr.json'))) {
     // S2 has just created a fresh CR and is still reading sitemaps; swap the checkpoint in before its workers start.
