@@ -51,6 +51,12 @@ Options learned on real sites (2 Oct 2026 runs):
 - `node renderlinks.js <KEY> [--lanes 4] [--wait 2500]` — run after crawl.js on JavaScript-rendered sites (CivicPlus HCMS titles
   "… Official Website | Official Website"), where S2 sees only the menus and records 0 documents: renders every crawled page and adds
   its document links to `CR.files` in S2's row shape; then classify with `["recheckNode","*status0"]`.
+- `node renderlinks.js <KEY> --discover [--seed urls.txt]` — for a single-page app whose raw HTML has no links at all (OCV/myocv
+  sites: S2 records 1 page). Follows same-host links found in the rendered pages (S2's skip and news rules, `maxPages` cap) and adds
+  the new pages to `CR.pages` and their external links to `CR.ext`. `--seed` adds start URLs, one per line — for OCV, the routes
+  listed in `https://cdn.myocv.com/ocvapps/<appId>/public/int_webManifest.json` (features of type page / blogList / map / contacts).
+  Then run classify.js as usual (`--get404 --fetch-timeout`, op `["recheckNode","*status0"]`). Every OCV page shares one title, so
+  review dump_noaec.txt for documents the classifier missed.
 - Review traps seen: S4's latest-only rule groups look-alike titles ("Ordinance No. 26-24" vs "25-60") as one family and marks
   distinct ordinances superseded; "Historical" in a district name trips the archive rule; S9 makes PARCELS TAB rows Upload = Yes
   unless a `setMap` sets No; titles containing "Plat" or "Map" become Later.
