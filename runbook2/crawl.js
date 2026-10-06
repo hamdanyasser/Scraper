@@ -1,4 +1,4 @@
-// crawl.js <KEY> [--resume] [--exclude regex] [--fetch-timeout] — Runbook 2 Stage 3 steps 1–3: S2 crawl in "Tab B", crawlHealth, one slow retryFailed pass.
+// crawl.js <KEY> [--resume] [--exclude regex] [--fetch-timeout] [--upgrade-http] [--no-retry] — Runbook 2 Stage 3 steps 1–3: S2 crawl in "Tab B", crawlHealth, one slow retryFailed pass.
 // Needs <state>/<KEY>/run.json = window.RUN {key,city,state,county,site,date,maxPages,maxMinutes,crawlNews,etlHtml}.
 // Checkpoints window.CR to cr.json every 2 minutes, so a crash never loses the crawl; --resume continues from cr.json.
 const path = require('path');
@@ -31,7 +31,21 @@ const L = require('./lib');
   // /i-want-to/advanced-components/ demo templates). Does not touch S2's code; the count is kept in CR.excluded for the comment.
   const exIdx = process.argv.indexOf('--exclude');
   const exclude = exIdx > 0 ? process.argv[exIdx + 1] : null;
+  // --upgrade-http: the site links its own pages as http://, which the https page's in-page fetch blocks as mixed content
+  // (status 0 "network" failures, e.g. Charleston WV Building Commission / Planning). Rewrite same-host http:// URLs in CR.queue
+  // to https:// at every poll; with --resume, also move those failed http:// pages back to the queue as https://.
+  const upgrade = process.argv.includes('--upgrade-http');
+  const doUpgrade = () => page.evaluate(fromFailed => {
+    const hosts = new Set(CR.hosts || [CR.host]); const isOwn = u => { try { const x = new URL(u); return x.protocol === 'http:' && hosts.has(x.host); } catch (e) { return false; } };
+    const inQ = new Set(CR.queue); let n = 0;
+    const add = u => { const h = 'https://' + u.slice(7); if (CR.pages[h] || inQ.has(h)) return; inQ.add(h); CR.seen.add(h); CR.queue.push(h); n++; };
+    CR.queue = CR.queue.filter(u => { if (!isOwn(u)) return true; add(u); return false; });
+    if (fromFailed) for (const u of Object.keys(CR.failed)) if (isOwn(u) && CR.failed[u].status === 0) { delete CR.failed[u]; add(u); }
+    CR.upgradedHttp = (CR.upgradedHttp || 0) + n; return n;
+  }, fromFailed);
+  let fromFailed = resume;
   const purge = async () => {
+    if (upgrade) { const n = await doUpgrade(); fromFailed = false; if (n) L.log('upgraded http:// to https://', n); }
     if (!exclude) return;
     const n = await page.evaluate(re => { const r = new RegExp(re, 'i'); const b = CR.queue.length; CR.queue = CR.queue.filter(u => !r.test(u)); CR.excluded = (CR.excluded || 0) + b - CR.queue.length; CR.excludeRe = re; return b - CR.queue.length; }, exclude);
     if (n) L.log('excluded from queue', n);
@@ -40,9 +54,9 @@ const L = require('./lib');
   let lastSave = 0;
   const save = async () => { await page.evaluate(() => { CR.lastSave = Date.now(); }); await L.saveCR(page, dir); lastSave = Date.now(); };
   for (;;) {
-    await page.waitForTimeout(exclude ? 5000 : 30000);
+    await page.waitForTimeout(exclude || upgrade ? 5000 : 30000);
     await purge();
-    if (exclude && (Date.now() - (save.lastLog || 0) < 30000)) continue;
+    if ((exclude || upgrade) && (Date.now() - (save.lastLog || 0) < 30000)) continue;
     save.lastLog = Date.now();
     const s = JSON.parse(await page.evaluate(() => crawlStatus()));
     L.log('crawlStatus', JSON.stringify(s));
@@ -60,7 +74,8 @@ const L = require('./lib');
   let health = JSON.parse(await page.evaluate(() => crawlHealth()));
   L.log('crawlHealth', JSON.stringify(health));
   const out = { first: health, retry: null };
-  if (health.verdict !== 'ok' && health.verdict !== 'blocked') {
+  // --no-retry: skip the slow pass on a resumed crawl whose one slow retry has already run (the runbook allows one pass only).
+  if (health.verdict !== 'ok' && health.verdict !== 'blocked' && !process.argv.includes('--no-retry')) {
     // partial / heavy / challenge: the one slow second pass (2 lanes, 1.5 s pause), unattended.
     const r = await page.evaluate(() => retryFailed(2, 1500));
     L.log('retryFailed', r);
